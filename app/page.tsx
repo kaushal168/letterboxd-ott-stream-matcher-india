@@ -19,11 +19,12 @@ const normalizeProvider = (name: string): string => {
 const LANGUAGE_MAP: Record<string, string> = {
   en: "English", hi: "Hindi", te: "Telugu", ta: "Tamil", ml: "Malayalam", 
   kn: "Kannada", mr: "Marathi", gu: "Gujarati", bn: "Bengali", pa: "Punjabi",
-  ja: "Japanese", ko: "Korean", zh: "Chinese", fr: "French", es: "Spanish", 
-  it: "Italian", de: "German", ru: "Russian", pt: "Portuguese", ar: "Arabic",
-  th: "Thai", id: "Indonesian", tr: "Turkish", nl: "Dutch", sv: "Swedish",
-  no: "Norwegian", da: "Danish", fi: "Finnish", pl: "Polish", hu: "Hungarian",
-  cs: "Czech", ro: "Romanian", uk: "Ukrainian", vi: "Vietnamese", tl: "Tagalog"
+  ja: "Japanese", ko: "Korean", zh: "Chinese", ca: "Cantonese", cn: "Cantonese",
+  fr: "French", es: "Spanish", it: "Italian", de: "German", ru: "Russian",
+  pt: "Portuguese", ar: "Arabic", fa: "Farsi", ur: "Urdu", th: "Thai",
+  id: "Indonesian", tr: "Turkish", nl: "Dutch", sv: "Swedish", no: "Norwegian",
+  da: "Danish", fi: "Finnish", pl: "Polish", hu: "Hungarian", cs: "Czech",
+  ro: "Romanian", uk: "Ukrainian", vi: "Vietnamese", tl: "Tagalog"
 };
 
 const getLanguageName = (code: string) => {
@@ -65,7 +66,6 @@ function SpotlightCard({ movie, isDarkMode }: { movie: MovieItem, isDarkMode: bo
       />
 
       <div className="aspect-[2/3] bg-gray-100 dark:bg-gray-800 relative overflow-hidden border-b border-gray-200 dark:border-gray-800 shrink-0">
-        
         {movie.language && movie.language !== "en" && (
           <div className="absolute top-2 right-2 z-30 bg-slate-900/80 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wider shadow-sm">
             {getLanguageName(movie.language)}
@@ -171,6 +171,37 @@ export default function Home() {
       .catch((err) => console.error("Error updating view count:", err));
   }, []);
 
+  const syncChannel = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
+    
+    syncChannel.current = new BroadcastChannel("cinefind_sync");
+    
+    syncChannel.current.onmessage = (event) => {
+      if (event.data?.type === "START_LOADING") {
+        setIsLoading(true);
+        setLoadingProgress("Fetching in another tab...");
+      } else if (event.data?.type === "STOP_LOADING") {
+        setIsLoading(false);
+        setLoadingProgress("");
+      }
+    };
+
+    return () => {
+      syncChannel.current?.close();
+    };
+  }, []);
+
+  const broadcastStatus = (type: "START_LOADING" | "STOP_LOADING") => {
+    try {
+      // Send the message on the exact same instance so it doesn't echo back to itself
+      syncChannel.current?.postMessage({ type });
+    } catch (e) {
+      console.error("BroadcastChannel post error:", e);
+    }
+  };
+
   const handleSearch = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -183,6 +214,8 @@ export default function Home() {
     setSelectedProviders([]);
     setSelectedGenre("all");
     setSelectedLanguage("all");
+
+    broadcastStatus("START_LOADING");
 
     try {
       const res = await fetch(`/api/search?query=${encodeURIComponent(searchQuery)}`);
@@ -198,13 +231,31 @@ export default function Home() {
       setError(err.message);
     } finally {
       setIsLoading(false);
+      broadcastStatus("STOP_LOADING");
     }
   };
 
   const handleListSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!listInput.trim()) return;
-    handleFetch(listInput.trim());
+    const input = listInput.trim();
+    if (!input) return;
+
+    let targetUrl = input;
+
+    if (!input.includes("/") && !input.includes("letterboxd.com")) {
+      targetUrl = `https://letterboxd.com/${input}/watchlist/`;
+    } 
+    else if (
+      input.includes("letterboxd.com") && 
+      !input.includes("/list/") && 
+      !input.includes("/watchlist") && 
+      !input.includes("/films/")
+    ) {
+      targetUrl = input.endsWith("/") ? `${input}watchlist/` : `${input}/watchlist/`;
+    }
+
+    setListInput(targetUrl);
+    handleFetch(targetUrl);
   };
 
   const handleFetch = async (urlToScrape: string) => {
@@ -218,6 +269,7 @@ export default function Home() {
     setSelectedLanguage("all");
     
     setLoadingProgress("Starting import...");
+    broadcastStatus("START_LOADING");
 
     let currentPage = 1;
     let morePages = true;
@@ -265,6 +317,7 @@ export default function Home() {
       setLoadingProgress("");
     } finally {
       setIsLoading(false);
+      broadcastStatus("STOP_LOADING");
     }
   };
 
@@ -286,7 +339,8 @@ export default function Home() {
   );
 
   const availableGenres = Array.from(new Set(movies.flatMap(m => m.genres || []))).sort();
-  const availableLanguages = Array.from(new Set(movies.map(m => m.language).filter(Boolean))).sort();
+  const availableLanguages = Array.from(new Set(movies.map(m => m.language).filter(Boolean)))
+    .sort((a, b) => getLanguageName(String(a)).localeCompare(getLanguageName(String(b))));
 
   const toggleProvider = (providerName: string) => {
     setSelectedProviders((prev) =>
@@ -298,18 +352,15 @@ export default function Home() {
 
   const filteredMovies = movies
     .filter((m) => {
-      // 1. Provider Filter
       if (selectedProviders.length > 0) {
         const movieProviders = m.providers?.flatrate?.map((p: any) => normalizeProvider(p.name)) || [];
         if (!selectedProviders.some((sp) => movieProviders.includes(sp))) return false;
       }
       
-      // 2. Genre Filter
       if (selectedGenre !== "all") {
         if (!m.genres || !m.genres.includes(selectedGenre)) return false;
       }
 
-      // 3. Language Filter
       if (selectedLanguage !== "all") {
         if (m.language !== selectedLanguage) return false;
       }
@@ -327,12 +378,10 @@ export default function Home() {
 
   return (
     <div className={isDarkMode ? "dark" : ""}>
-      
       <div 
         className="font-sans flex flex-col relative transition-colors duration-500 bg-slate-50 dark:bg-gray-950 text-slate-900 dark:text-gray-100"
         style={{ zoom: 0.9, minHeight: "111.2vh" } as React.CSSProperties} 
       >
-        
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
           <div 
             className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] min-w-[500px] min-h-[500px] blur-[100px] rounded-full animate-pulse transition-colors duration-700 bg-blue-300/40 dark:bg-blue-600/20" 
@@ -383,7 +432,7 @@ export default function Home() {
                 disabled={isLoading || !listInput.trim()}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-r-md font-medium transition-colors disabled:opacity-50 whitespace-nowrap text-sm shadow-sm"
               >
-                {isLoading && loadingProgress.includes("Page") ? loadingProgress : "Fetch List"}
+                {isLoading && loadingProgress ? loadingProgress : "Fetch List"}
               </button>
             </form>
 
@@ -432,7 +481,7 @@ export default function Home() {
           {movies.length > 0 && (
             <div className="sticky top-0 z-50 backdrop-blur-2xl border-b py-3 mb-6 transition-all duration-300 bg-white/90 dark:bg-gray-950/80 border-gray-200 dark:border-gray-800/80 shadow-sm shadow-slate-200/50 dark:shadow-gray-950/50">
               {availableProviders.length > 0 && (
-                <div className="mb-3">
+                <div className="mb-3 px-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <h3 className="text-xs font-semibold text-blue-600 dark:text-blue-500 uppercase tracking-wider">
@@ -513,61 +562,61 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 w-full xl:w-auto">
-                  
-                  {/* Genre Dropdown */}
-                  {availableGenres.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                      <label htmlFor="genre" className="text-xs text-slate-500 dark:text-gray-400">
-                        Genre:
-                      </label>
-                      <select
-                        id="genre"
-                        value={selectedGenre}
-                        onChange={(e) => setSelectedGenre(e.target.value)}
-                        className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none"
-                      >
-                        <option value="all">All Genres</option>
-                        {availableGenres.map(genre => (
-                          <option key={String(genre)} value={String(genre)}>
-                            {String(genre)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  {/* --- MOBILE COMPACT ROW: GENRE & LANG --- */}
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    {availableGenres.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-1 sm:flex-none min-w-0">
+                        <label htmlFor="genre" className="text-xs text-slate-500 dark:text-gray-400 shrink-0">
+                          Genre:
+                        </label>
+                        <select
+                          id="genre"
+                          value={selectedGenre}
+                          onChange={(e) => setSelectedGenre(e.target.value)}
+                          className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none w-full sm:w-auto truncate"
+                        >
+                          <option value="all">All</option>
+                          {availableGenres.map(genre => (
+                            <option key={String(genre)} value={String(genre)}>
+                              {String(genre)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-                  {/* Language Dropdown */}
-                  {availableLanguages.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                      <label htmlFor="language" className="text-xs text-slate-500 dark:text-gray-400">
-                        Language:
-                      </label>
-                      <select
-                        id="language"
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none"
-                      >
-                        <option value="all">All Languages</option>
-                        {availableLanguages.map(lang => (
-                          <option key={String(lang)} value={String(lang)}>
-                            {getLanguageName(String(lang))}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                    {availableLanguages.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-1 sm:flex-none min-w-0">
+                        <label htmlFor="language" className="text-xs text-slate-500 dark:text-gray-400 shrink-0">
+                          <span className="sm:hidden">Lang:</span>
+                          <span className="hidden sm:inline">Language:</span>
+                        </label>
+                        <select
+                          id="language"
+                          value={selectedLanguage}
+                          onChange={(e) => setSelectedLanguage(e.target.value)}
+                          className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none w-full sm:w-auto truncate"
+                        >
+                          <option value="all">All</option>
+                          {availableLanguages.map(lang => (
+                            <option key={String(lang)} value={String(lang)}>
+                              {getLanguageName(String(lang))}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
 
-                  {/* Sort Dropdown */}
-                  <div className="flex items-center gap-1.5 xl:border-l xl:pl-4 border-gray-300 dark:border-gray-700">
-                    <label htmlFor="sort" className="text-xs text-slate-500 dark:text-gray-400">
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto xl:border-l xl:pl-4 border-gray-300 dark:border-gray-700">
+                    <label htmlFor="sort" className="text-xs text-slate-500 dark:text-gray-400 shrink-0">
                       Sort:
                     </label>
                     <select
                       id="sort"
                       value={sortBy}
                       onChange={(e) => setSortBy(e.target.value)}
-                      className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none"
+                      className="font-sans border text-xs rounded-md py-1.5 px-2 outline-none cursor-pointer transition-colors focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800/80 border-gray-300 dark:border-gray-700 text-slate-900 dark:text-white shadow-sm dark:shadow-none w-full sm:w-auto truncate"
                     >
                       <option value="default">List Order</option>
                       <option value="rating">Highest Rated (TMDB)</option>
@@ -607,7 +656,6 @@ export default function Home() {
             
             <div className="flex items-center gap-3">
               <p>© 2026 CineFind.</p>
-              
               {viewCount !== null && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 border border-slate-200 dark:border-gray-700/60 transition-colors">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
