@@ -195,7 +195,6 @@ export default function Home() {
 
   const broadcastStatus = (type: "START_LOADING" | "STOP_LOADING") => {
     try {
-      // Send the message on the exact same instance so it doesn't echo back to itself
       syncChannel.current?.postMessage({ type });
     } catch (e) {
       console.error("BroadcastChannel post error:", e);
@@ -249,9 +248,15 @@ export default function Home() {
       input.includes("letterboxd.com") && 
       !input.includes("/list/") && 
       !input.includes("/watchlist") && 
-      !input.includes("/films/")
+      !input.includes("/films")
     ) {
       targetUrl = input.endsWith("/") ? `${input}watchlist/` : `${input}/watchlist/`;
+    }
+
+    if (!targetUrl.includes("letterboxd.com") && targetUrl.includes("/")) {
+      targetUrl = targetUrl.startsWith("http") 
+        ? targetUrl 
+        : `https://letterboxd.com/${targetUrl.replace(/^\//, '')}`;
     }
 
     setListInput(targetUrl);
@@ -464,7 +469,7 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="relative z-10 flex-grow max-w-7xl mx-auto w-full px-6 flex flex-col">
+        <main className="relative z-10 flex-grow max-w-[1800px] mx-auto w-full px-6 flex flex-col">
           {error && (
             <div className="p-4 rounded-md mt-6 shadow-md border bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-800 text-red-800 dark:text-red-300 transition-colors">
               {error}
@@ -562,7 +567,6 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 w-full xl:w-auto">
-                  {/* --- MOBILE COMPACT ROW: GENRE & LANG --- */}
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     {availableGenres.length > 0 && (
                       <div className="flex items-center gap-1.5 flex-1 sm:flex-none min-w-0">
@@ -641,7 +645,7 @@ export default function Home() {
           )}
 
           {movies.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6 pb-12">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-6 pb-12">
               <AnimatePresence>
                 {filteredMovies.map((movie, idx) => (
                   <SpotlightCard key={`${movie.tmdbId}-${idx}`} movie={movie} isDarkMode={isDarkMode} />
@@ -652,7 +656,7 @@ export default function Home() {
         </main>
 
         <footer className="relative z-20 border-t p-6 backdrop-blur-md mt-auto shrink-0 transition-colors duration-300 bg-white/80 dark:bg-gray-950/80 border-gray-200 dark:border-gray-800">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-500 dark:text-gray-500">
+          <div className="max-w-[1800px] mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-500 dark:text-gray-500">
             
             <div className="flex items-center gap-3">
               <p>© 2026 CineFind.</p>

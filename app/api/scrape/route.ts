@@ -40,18 +40,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid Letterboxd URL" }, { status: 400 });
     }
 
-    const isValidPath = /\/(watchlist|list|film)\//.test(baseUrl);
+    const isValidPath = /\/(watchlist|list|film|films)\//.test(baseUrl);
     const isDiaryPath = /\/films\//.test(baseUrl);
     
-    if (isDiaryPath) {
-      return NextResponse.json({ 
-        error: "User diary pages (/films/) are heavily protected by Letterboxd. Please put the movies in a public Watchlist or Custom List to scan them." 
-      }, { status: 400 });
+    // Allow Page 1 for recent films, but cleanly exit for pagination to prevent massive load
+    if (isDiaryPath && page > 1) {
+      return NextResponse.json({ movies: [], hasNextPage: false });
     }
 
     if (!isValidPath) {
       return NextResponse.json({ 
-        error: "Please enter a valid Letterboxd list, watchlist, or movie URL." 
+        error: "Please enter a valid Letterboxd list, watchlist, diary (/films/), or movie URL." 
       }, { status: 400 });
     }
 
